@@ -1,6 +1,7 @@
 # LifeOS Project Status
 
-*Last updated: 2026-07-17, after Phase 1 (project foundation scaffold).*
+*Last updated: 2026-07-17, after Phase 1 (project foundation scaffold) and
+infrastructure provisioning.*
 
 This file is a snapshot, not a planning document. It describes where the
 repository and its infrastructure actually stand today. It is expected to go
@@ -8,13 +9,24 @@ stale — update it at the end of every phase/slice rather than trusting it
 blindly. Where this file and `/docs` ever disagree about what's *approved*,
 `/docs` wins; this file only reports what has *actually been built*.
 
+**A note on sourcing:** this session has no direct tool access to the
+Vercel or Supabase dashboards/APIs. The Supabase-project, Vercel-project,
+environment-variable, and live-deployment facts below are recorded **as
+reported by the project owner**, not independently verified from within
+this session. Treat them as authoritative unless something in a later
+session (e.g., a failing build against real infra) contradicts them.
+
 ## Current Status
 
-Planning is complete and frozen (see `/docs`). **One implementation phase is
-complete: Phase 1 — project foundation scaffold.** No LifeOS feature, no
-database schema, and no authentication exists yet. The repository is a
-working, empty-of-business-logic Next.js + Supabase-SSR-wired application
-shell with its tooling fully green.
+Planning is complete and frozen (see `/docs`). **Phase 1 (project foundation
+scaffold) is complete, and infrastructure provisioning is substantially
+complete**: a real Supabase project and a real Vercel project exist, are
+connected, and a production deployment has been made and verified live (per
+project owner report). No LifeOS feature, no database schema, and no
+authentication exists yet — the deployed application is still the empty
+foundation shell from Phase 1. The remaining gap before the foundation
+feature slice is process infrastructure (CI, branch protection), not
+platform infrastructure.
 
 ## Infrastructure Completed
 
@@ -24,9 +36,11 @@ shell with its tooling fully green.
 - Tailwind CSS + shadcn/ui primitives (`components/ui`) installed and
   configured.
 - Supabase SSR client/server helpers and session-refresh cookie plumbing
-  wired in `lib/supabase/` — **not** wired to a real Supabase project yet,
-  and carries no authentication enforcement (that's deliberately deferred to
-  the foundation feature slice).
+  wired in `lib/supabase/` — now pointed at a real Supabase project via
+  configured environment variables, but still carries **no authentication
+  enforcement** (that's deliberately deferred to the foundation feature
+  slice; `lib/supabase/proxy.ts` still only refreshes the session cookie, it
+  does not gate routes).
 - Approved folder structure created: `lib/services`, `lib/queries`,
   `lib/validation`, `lib/dates`, `db/migrations`, `jobs`, `tests/unit`,
   `tests/e2e`, `tests/policies` — all empty except for README placeholders
@@ -34,41 +48,62 @@ shell with its tooling fully green.
 - Tooling green: ESLint, `tsc --noEmit`, Vitest (1 smoke test), Playwright +
   axe-core (configured, smoke-tested locally; not run in CI since no CI
   exists yet), Prettier, production build (`next build`).
+- **GitHub repository created**, Claude Code connected to it, all nine
+  planning documents committed to `main`.
+- **Supabase project created and connected** (env vars configured).
+- **Vercel project created and connected** (env vars configured).
+- **Production deployment completed and verified live.**
 
 ## Deployment Status
 
-**Not deployed anywhere.** No Vercel project has been created. No production
-or preview URL exists.
+**Live.** A production deployment to Vercel has completed and been verified
+live (per project owner report, 2026-07-17). The deployed application is
+still the empty Phase 1 foundation shell — no LifeOS feature is live, only
+the placeholder homepage and the underlying tooling/build pipeline.
+
+**Deployment URL:** not yet recorded in this document — the project owner
+has not shared the live URL with this session. Please provide it so this
+file can be completed accurately; until then, treat the URL field below as
+a placeholder, not a gap in the actual deployment.
 
 ## Supabase Status
 
-**No Supabase project exists.** `lib/supabase/client.ts` and `server.ts` are
-written against `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
-but these are unset locally and in any environment — only placeholder values
-live in `.env.example`. No tables, no RLS policies, no migrations, no seed
-data. `db/migrations` is empty.
+**Project created and connected** (per project owner report). Environment
+variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
+are configured in the deployment environment. Unchanged from before: **no
+tables, no RLS policies, no migrations, no seed data exist** — `db/migrations`
+is still empty, correctly, since schema work starts at `NEXT_STEPS.md`
+Slice 1 and this session was instructed not to write migrations. Creating
+the project is infrastructure; it does not itself advance database
+readiness.
 
 ## Vercel Status
 
-**No Vercel project exists.** Nothing has been deployed or connected to a
-Vercel account. The private-hosting operating posture (`Private-Hosting-and-Two-Person-Access-Amendment.md`
-Part 12) — whose Vercel account, whose Supabase account, custom domain,
-email provider — remains an open operational decision for the project owner,
-unchanged since the Phase 1 report.
+**Project created, connected to the GitHub repository, environment
+variables configured, and a production deployment has succeeded and been
+verified live** (per project owner report). The private-hosting operating
+posture (`Private-Hosting-and-Two-Person-Access-Amendment.md` Part 12) —
+specifically whose accounts these are, custom domain, and the P7-A email
+provider — remains an open operational decision the project owner has not
+yet stated to this session; account topology itself is presumably now
+settled by the act of creating these projects, but that detail hasn't been
+confirmed here.
 
 ## GitHub Status
 
 - Repository: `psteiner1101-maker/LifeOS`, default branch `main`.
+- Claude Code connected to the repository.
+- All nine planning documents committed to `main`.
 - PR #1 ("Phase 1: project foundation scaffold") merged into `main` on
   2026-07-17.
-- No branch protection, required checks, or CI workflow configured yet —
-  `main` currently accepts direct pushes. This conflicts with the approved
-  Git Workflow (`LifeOS-Technical-Handoff.md`: "main branch protected (tests
-  required, no direct pushes)") and should be configured before real feature
-  work accumulates history worth protecting.
+- **Still no branch protection, required checks, or CI workflow** — `main`
+  currently accepts direct pushes. This conflicts with the approved Git
+  Workflow (`LifeOS-Technical-Handoff.md`: "main branch protected (tests
+  required, no direct pushes)") and is the last unresolved piece of
+  `NEXT_STEPS.md` Slice 0.
 - No CI pipeline (GitHub Actions or equivalent) runs lint/typecheck/test/build
-  automatically on push or PR. All four checks have only been run manually,
-  locally, in this session.
+  automatically on push or PR. All four checks have only ever been run
+  manually, locally, in this session.
 
 ## Phase Completion
 
@@ -96,32 +131,39 @@ first *feature* phase in the approved plan, which the Blueprint calls the
 
 ## Current Branch
 
-`claude/lifeos-docs-upload-s5nyrn` — currently reset to match `main` exactly
-(its prior history was merged via PR #1). This document set is being added as
-the next commit on this branch.
+`claude/lifeos-docs-upload-s5nyrn` — reset to match `main` after PR #1
+merged, then carrying the `/project` engineering-operating-system commit and
+this status update on top. Not yet merged back into `main`.
 
 ## Current Deployment URL
 
-None. Nothing is deployed.
+**Not yet provided to this session.** Live production deployment is
+confirmed (per project owner report), but the actual URL has not been
+shared here. Update this line with the real URL as soon as it's available.
 
 ## Open Issues
 
 1. **No CI pipeline.** Lint/typecheck/test/build are not enforced automatically on push or PR.
 2. **No branch protection on `main`**, contrary to the approved Git Workflow.
-3. **No Supabase project provisioned** — required before any migration or the foundation feature slice can begin.
-4. **No Vercel project provisioned** — required before any real deployment.
-5. **Operational choices still open** (`Private-Hosting-and-Two-Person-Access-Amendment.md` Part 12.6): hosting-account topology, P7-A email provider, custom domain, backup cadence.
-6. **Documentation staleness noted, not fixed** (frozen by design): `Private-Hosting-and-Two-Person-Access-Amendment.md` §12.2 still calls D30 "still pending approval" while the Decision Register lists it Approved.
-7. **`npm audit`: 2 moderate advisories**, both in a `postcss` copy bundled inside Next.js's own `node_modules` — not fixable without downgrading Next.js to an old canary; tracked as an upstream issue, not a project defect.
+3. **Deployment URL not recorded** in this document — needs to be provided.
+4. **Operational choices still open** (`Private-Hosting-and-Two-Person-Access-Amendment.md` Part 12.6): the P7-A email provider, custom domain, and backup cadence haven't been confirmed to this session (account topology is presumably resolved by the projects now existing).
+5. **Documentation staleness noted, not fixed** (frozen by design): `Private-Hosting-and-Two-Person-Access-Amendment.md` §12.2 still calls D30 "still pending approval" while the Decision Register lists it Approved.
+6. **`npm audit`: 2 moderate advisories**, both in a `postcss` copy bundled inside Next.js's own `node_modules` — not fixable without downgrading Next.js to an old canary; tracked as an upstream issue, not a project defect.
+
+*(Resolved since the previous version of this file: no Supabase project,
+no Vercel project, and no live deployment — all now complete per project
+owner report.)*
 
 ## Next Recommended Milestone
 
-**Provision real infrastructure (Supabase project + CI + branch protection),
-then begin the foundation feature slice** exactly as scoped in
+**Finish the last piece of `NEXT_STEPS.md` Slice 0 — a CI workflow
+(lint/typecheck/test/build on every push and PR) and branch protection on
+`main` — then begin the foundation feature slice** exactly as scoped in
 `LifeOS-Implementation-Blueprint.md` §5 and `LifeOS-Technical-Handoff.md`
 "Implementation Phases": sign-up with automatic profile/workspace/settings
 creation, sign-in, Dashboard shell, Spaces (with Space ownership and
 Private/Shared visibility from day one), title-only Tasks, soft deletion, and
 baseline RLS with visibility enforcement — gated by both cross-workspace and
 cross-visibility policy tests. See `NEXT_STEPS.md` for the detailed,
-sliced breakdown.
+sliced breakdown. CI/branch-protection is a small, fast remaining step, not
+a new blocker on the scale of the platform infrastructure just completed.

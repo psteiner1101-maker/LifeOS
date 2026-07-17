@@ -1,55 +1,70 @@
 # Project Health Assessment
 
-*Assessed: 2026-07-17, after Phase 1 (project foundation scaffold).*
+*Assessed: 2026-07-17, after Phase 1 (project foundation scaffold) and
+infrastructure provisioning. Supersedes the same-day pre-infrastructure
+assessment.*
 
 Scores are 0–10 (10 = fully ready), scoped to **this repository's actual
 state**, not to the quality of the underlying plan. This document makes
 recommendations only — it changes no architecture and edits no planning
 document.
 
+**A note on sourcing:** this session has no direct tool access to the
+Vercel or Supabase dashboards/APIs. The scores below treat the Supabase
+project, Vercel project, environment-variable configuration, and live
+deployment as real, **as reported by the project owner** — this session
+has not independently queried either platform to confirm them.
+
 ## Scores
 
-| Dimension | Score | Rationale |
-|---|---|---|
-| **Architecture readiness** | 9.5 / 10 | Planning is complete, frozen, and internally consistent across all nine documents; every decision is sourced in the Decision Register. The half-point off is the one confirmed documentation staleness (D30's status described inconsistently in the amendment vs. the Decision Register) — cosmetic, not a design gap. |
-| **Infrastructure readiness** | 2 / 10 | Local tooling (Next.js, TypeScript, Tailwind, shadcn/ui, testing frameworks) is fully configured and green. But there is no CI pipeline, no branch protection on `main`, and no real Supabase or Vercel project — all four checks have only ever been run manually, by hand, in one session. |
-| **Deployment readiness** | 1 / 10 | Nothing is deployed anywhere. No Vercel project exists. The app has only been run locally. |
-| **Database readiness** | 0 / 10 (implemented) | Zero tables, zero migrations, zero RLS policies exist — correctly, since this phase was scoped to forbid them. The *design* is fully specified (Database-Schema-Design.md + its audit are complete and approved), so this is a sequencing fact, not a design gap: score reflects implementation state only. |
-| **Testing readiness** | 6 / 10 | Vitest, Playwright, and axe-core are installed, configured, and proven working end-to-end (one smoke test each, both passing). No feature test coverage exists yet because no features exist yet — that's expected at this stage, not a deficiency. The gap: none of this runs automatically in CI yet, so a regression wouldn't currently be caught before merge. |
-| **Documentation quality** | 9 / 10 | The nine planning documents are unusually thorough, cross-referenced, and self-auditing (the amendment explicitly flags its own open items). This phase adds a matching engineering operating system (`/project`). Point off because the roadmap in `NEXT_STEPS.md` is necessarily a best-effort projection, not itself an approved document, and will need re-slicing as real work begins. |
-| **Technical debt** | Low | No shortcuts were taken in Phase 1 — the scaffold is a straightforward, unmodified starter with demo content removed and approved-only dependencies. The only debt items are the open issues below, all deliberate and tracked, not accidental. |
-| **Overall readiness** | 6 / 10 | The project is *unusually* well-prepared on the planning side and *appropriately* unbuilt on the implementation side for where it is in the process. The gap between "ready to design the next slice" (very high) and "ready to deploy a slice to production" (very low) is the honest story here — see recommendations. |
+| Dimension | Score | Change | Rationale |
+|---|---|---|---|
+| **Architecture readiness** | 9.5 / 10 | unchanged | Planning is complete, frozen, and internally consistent across all nine documents. The half-point off is the one confirmed documentation staleness (D30) — cosmetic, not a design gap. |
+| **Infrastructure readiness** | 8 / 10 | ▲ from 2 | A real Supabase project and a real Vercel project exist and are connected, with environment variables configured (per project owner report). Local tooling remains fully green. The remaining 2 points are CI (no automated lint/typecheck/test/build gate on push/PR) and branch protection on `main` — both still unconfigured. |
+| **Deployment readiness** | 9 / 10 | ▲ from 1 | A production deployment has succeeded and been verified live (per project owner report). Not a full 10 because there's no CI gate in front of deployments yet, so nothing currently stops a broken build from being deployed except manual discipline. |
+| **Database readiness** | 0 / 10 (implemented) | unchanged | Zero tables, zero migrations, zero RLS policies — correctly, since this remains explicitly out of scope for this session. Creating the Supabase *project* is infrastructure, not schema; it doesn't move this score. The design remains fully specified and ready to implement starting at `NEXT_STEPS.md` Slice 1. |
+| **Testing readiness** | 6 / 10 | unchanged | Vitest, Playwright, and axe-core remain installed, configured, and proven working locally. The gap is unchanged: none of it runs automatically yet, so a regression wouldn't be caught before merge or before deployment. This will move once CI exists — see recommendations. |
+| **Documentation quality** | 9.5 / 10 | ▲ from 9 | `/project` now reflects the true infrastructure state and is being kept current in near-real-time, demonstrating the discipline `DEVELOPMENT_RULES.md` calls for. Still not a 10 because `NEXT_STEPS.md`'s roadmap is a projection that will need re-slicing as real slices land. |
+| **Technical debt** | Low | unchanged | No shortcuts were taken. The only debt items are the open issues in `PROJECT_STATUS.md`, all deliberate and tracked — chiefly the missing CI/branch-protection pair, which is now the single largest remaining gap in the whole repository. |
+| **Overall readiness** | 7.5 / 10 | ▲ from 6 | The two hardest, slowest-to-fix gaps from the last assessment — no real database platform, no real deployment target — are now resolved. What's left (CI, branch protection) is comparatively small and fast. The project is close to genuinely ready to start the foundation feature slice. |
+
+## What Changed Since the Last Assessment
+
+- Supabase project: **provisioned** (was: didn't exist).
+- Vercel project: **provisioned** (was: didn't exist).
+- Environment variables: **configured** (was: placeholders only).
+- Deployment: **live and verified** (was: nothing deployed).
+- Unchanged: no CI, no branch protection, zero database schema/migrations
+  (correctly — out of scope for this session), the two `npm audit`
+  advisories, the D30 documentation staleness note, and the open Part 12.6
+  operational questions (email provider, custom domain, backup cadence).
 
 ## Recommendations
 
 These are process recommendations only. None of them touches `/docs`, adds a
 database table, writes a migration, or implements a feature.
 
-1. **Provision infrastructure before the foundation feature slice begins**
-   (`NEXT_STEPS.md` Slice 0): a real Supabase project, a real Vercel
-   project, environment variables wired, and a CI workflow running
-   `lint`/`typecheck`/`test`/`build` on every push and PR. Building Slice 1
-   (identity/workspace migrations) against a real database from the start
-   avoids a costly later reconciliation between "what we assumed" and "what
-   Supabase actually enforces."
-2. **Enable branch protection on `main`** as soon as Slice 0's CI workflow
-   is green — the approved Git Workflow already calls for this
-   (`LifeOS-Technical-Handoff.md`), and it currently isn't configured.
+1. **Close out the remaining piece of `NEXT_STEPS.md` Slice 0 before Slice
+   1**: a CI workflow running `lint`/`typecheck`/`test`/`build` on every
+   push and PR, and branch protection on `main` requiring that workflow to
+   pass. This is now the only thing standing between the repository and a
+   fully professional baseline — it's small and fast relative to the
+   infrastructure work already done.
+2. **Record the live deployment URL in `PROJECT_STATUS.md`** — it isn't
+   yet known to this session; once shared, the status document should be
+   completed with it.
 3. **Resolve the two moderate `npm audit` advisories by monitoring, not
    forcing** — they live inside Next.js's own bundled `postcss` copy;
    `npm audit fix --force` would downgrade Next.js to an ancient canary.
    Re-check on each routine `next` version bump instead.
-4. **Decide the open Part 12.6 operational questions early** (hosting
-   account topology, the P7-A email provider, custom domain, backup
-   cadence) — none of them block Slice 0–6, but the invitation phase
-   (Slice 16) will stall without an email provider decision, and it's
-   cheaper to decide once than to revisit under time pressure later.
-5. **Keep `/project` current.** The value of `PROJECT_STATUS.md` and this
-   health assessment decays fast if they're not updated at the end of every
-   slice — treat updating them as part of each slice's Definition of Done,
-   not a separate later task.
+4. **Confirm the open Part 12.6 operational questions** (the P7-A email
+   provider especially — it will hard-block Slice 16, the invitation
+   phase, if left undecided) — none of them block Slices 0–6 today.
+5. **Keep `/project` current.** Today's update cycle (infra completed →
+   status and health documents updated same day) is exactly the intended
+   discipline — keep it up at the end of every slice, not just at major
+   milestones.
 6. **Re-run this health assessment at the Alpha milestone** (end of
-   `NEXT_STEPS.md` Slice 6) — that's the first point where "database
-   readiness" and "deployment readiness" should have moved meaningfully,
-   and it's a natural checkpoint to confirm the roadmap still matches
-   reality.
+   `NEXT_STEPS.md` Slice 6) — that's the next point where "database
+   readiness" should move meaningfully, and a natural checkpoint to confirm
+   the roadmap still matches reality.
