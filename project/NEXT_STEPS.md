@@ -1,7 +1,9 @@
 # Next Steps — Implementation Roadmap
 
 *Roadmap baseline: 2026-07-17, immediately after Phase 1 (project foundation
-scaffold).*
+scaffold). Updated 2026-07-17 at the Slice 0 checkpoint: Slice 0 is complete
+(PR #2 merged, CI green, repository public — all verified by GitHub
+metadata); Slice 1 is expanded below into a detailed execution plan.*
 
 This roadmap breaks the approved architecture into concrete, git-branch-sized
 slices. It follows the phase order in `LifeOS-Technical-Handoff.md`
@@ -19,42 +21,262 @@ Expectations").
 
 ---
 
-## Slice 0 — Infrastructure Provisioning
+## Slice 0 — Infrastructure Provisioning — ✅ COMPLETE
 
 - **Objective:** Provision a real Supabase project (dev environment) and a
   real Vercel project; wire environment variables; add a CI workflow that
   runs `lint`, `typecheck`, `test`, and `build` on every push/PR; enable
   branch protection on `main` (required checks, no direct pushes).
 - **Estimated complexity:** Low–Medium (configuration, no application code).
-- **Dependencies:** None — can start immediately.
-- **Files likely to change:** `.github/workflows/ci.yml` (new), `README.md`
-  (setup instructions), no application code.
-- **Testing required:** Open a throwaway PR to confirm CI runs and blocks on
-  a deliberately broken check; confirm a direct push to `main` is rejected.
-- **Definition of Done:** CI green on a real PR; branch protection verified;
-  `PROJECT_STATUS.md` "Deployment/Supabase/Vercel/GitHub Status" updated to
-  reflect real infrastructure.
-- **Suggested branch:** `chore/infra-provisioning`
+- **Dependencies:** None.
+- **Files changed:** `.github/workflows/ci.yml` (added, PR #2, merged).
+- **Testing performed:** CI verified green on PR #2 (pull_request trigger)
+  and on `main` after merge (push trigger) — both confirmed via GitHub
+  metadata.
+- **Definition of Done — status:**
+  - [x] CI green on a real PR — verified by GitHub metadata.
+  - [x] Supabase project provisioned — user-reported.
+  - [x] Vercel project provisioned, connected, deploying successfully —
+        verified by GitHub metadata (commit-status API).
+  - [x] Repository made public — verified by GitHub metadata.
+  - [~] Branch protection — **partially done**: a protection rule exists on
+        `main` (verified by GitHub metadata), but the CI check is not yet
+        attached as a *required* status check (`contexts: []`, verified by
+        GitHub metadata), and the rest of the rule's configuration isn't
+        readable by this session's token (403 — needs direct confirmation
+        in GitHub Settings). Marked complete per instruction, with this
+        residual item tracked in `PROJECT_STATUS.md` Open Issues #1–#2.
+  - [x] `PROJECT_STATUS.md` updated to reflect real infrastructure.
+- **Suggested branch:** `chore/infra-provisioning` — merged via PR #2, then
+  deleted (confirmed via GitHub metadata).
 
 ---
 
 ## Slice 1 — Foundation: Identity & Workspace Migrations
 
-- **Objective:** Numbered migrations for `profiles`, `workspaces`,
-  `workspace_members`, `user_settings`, `invitations` (schema only — no
-  application code), per migration stage 1 (`LifeOS-Technical-Handoff.md`
-  "Migration Order").
-- **Estimated complexity:** Medium.
-- **Dependencies:** Slice 0 (needs a real Supabase project to apply
-  migrations against).
-- **Files likely to change:** `db/migrations/0001_identity_and_workspace.sql`
-  + paired down-migration.
-- **Testing required:** Migration applies/reverts cleanly against a fresh
-  dev database; no application-level tests yet (nothing reads/writes these
-  tables until Slice 2).
-- **Definition of Done:** Migration numbered, reversible, applied to dev;
-  down-migration verified to actually undo it.
-- **Suggested branch:** `feat/foundation-identity-migrations`
+**Branch:** `feat/foundation-identity-migrations`
+**Status:** Not started — detailed execution plan below, produced at the
+Slice 0 checkpoint per explicit instruction. **No migration has been
+created and no SQL has been written** — this section is a plan only.
+
+### Objective
+
+Stand up the schema-only foundation for identity and workspace ownership —
+`profiles`, `workspaces`, `workspace_members`, `user_settings`,
+`invitations` — exactly matching migration stage 1
+(`LifeOS-Technical-Handoff.md` "Migration Order": *"Identity/ownership
+(profiles, workspaces, workspace_members, user_settings, invitations —
+F2)"*) and the workspace-anchoring model (D18), with Space ownership and
+visibility deliberately **not** included here (that's Slice 4, migration
+stage 2). No application code, no auth flow, no RLS *policies* with real
+logic yet beyond enabling RLS itself — this slice is pure schema.
+
+### Migration Order
+
+Five migrations, applied in this sequence (each a separate numbered file
+with a paired down-migration, per the approved Git Workflow — no manual
+database changes, no combined mega-migration):
+
+1. `0001_profiles`
+2. `0002_workspaces`
+3. `0003_workspace_members`
+4. `0004_user_settings`
+5. `0005_invitations`
+
+This ordering is *within* migration stage 1 only — it doesn't renumber the
+13-stage order in `LifeOS-Technical-Handoff.md`; stage 1 simply now has 5
+internal steps instead of 1. (Alternative considered: one combined
+migration for the whole stage, matching the Handoff's stage-level
+granularity exactly. Recommendation is 5 small files instead, for smaller
+reversible units and cleaner code review — this is an implementation
+choice, not an architectural one; flagged in Assumptions below for
+confirmation.)
+
+### Table Creation Order (= Foreign Key Dependency Order)
+
+```
+profiles            (references auth.users — Supabase-managed, already exists)
+  └── workspaces          (no FK to profiles in the minimal model — see Assumption 1)
+        └── workspace_members   (FK → workspaces, FK → profiles)
+  └── user_settings        (FK → profiles)
+  └── invitations          (FK → workspaces, FK → profiles [created_by])
+```
+
+Creation must proceed top-to-bottom in this order because `workspace_members`
+and `invitations` both depend on rows existing in `workspaces` and
+`profiles` first. `user_settings` depends only on `profiles`.
+
+### Foreign Key Dependencies
+
+| Table | Foreign keys | On delete |
+|---|---|---|
+| `profiles` | `id` → `auth.users.id` (shared PK, not a separate UUID — standard Supabase pattern) | cascade (Supabase manages `auth.users` deletion; out of scope to override here) |
+| `workspaces` | none in the minimal model (see Assumption 1) | — |
+| `workspace_members` | `workspace_id` → `workspaces.id`; `user_id` → `profiles.id` | restrict (membership rows are removed by the protected member-removal service, Slice 16 — never cascaded silently) |
+| `user_settings` | `user_id` → `profiles.id` | cascade (settings are meaningless without the profile) |
+| `invitations` | `workspace_id` → `workspaces.id`; `created_by` → `profiles.id` | restrict on `workspace_id`; `created_by` should tolerate the inviter's profile existing (it always will in v1's two-account model) |
+
+### Indexes
+
+- `workspace_members(workspace_id)` — every RLS policy from Slice 2 onward
+  joins through this table to check membership; this is the hottest lookup
+  path in the entire schema.
+- `workspace_members(user_id)` — a user's own membership lookup ("what
+  workspace do I belong to").
+- `invitations(workspace_id)` — Owner's Settings view of their own
+  invitation(s).
+- `invitations(token)` — unique index, for the acceptance flow's token
+  lookup (Slice 16); token stored hashed, looked up by exact match only
+  (never scanned).
+- Primary key indexes are automatic on all five tables.
+
+### Constraints
+
+- `workspace_members`: `CHECK (role IN ('owner', 'member'))`; `UNIQUE (workspace_id, user_id)`; a **partial unique index** `UNIQUE (workspace_id) WHERE role = 'owner'` to guarantee exactly one owner row per workspace at the database level, as defense-in-depth alongside the service-layer check (see RLS Strategy).
+- `invitations`: `CHECK (status IN ('pending', 'accepted', 'revoked', 'expired'))`; a **partial unique index** `UNIQUE (workspace_id) WHERE status = 'pending'` to enforce "at most one invitation at a time" (amendment Part 4.2) at the database level too.
+- `user_settings`: `UNIQUE (user_id)` (or `user_id` as the primary key directly — equivalent, pick one at implementation time).
+- All tables: `created_at timestamptz NOT NULL DEFAULT now()`; `updated_at timestamptz NOT NULL DEFAULT now()`.
+- The **two-member-per-workspace cap** cannot be expressed as a simple `CHECK` (it requires counting sibling rows) — see Triggers below.
+
+### Triggers
+
+- `updated_at` auto-touch trigger on all five tables (standard pattern, implementation detail, not architectural).
+- A trigger (or equivalent) enforcing the **two-member-per-workspace cap** as a database-level backstop. Per D17's own stated philosophy — the database/RLS layer is the *baseline*, never the *sole* integrity control — primary enforcement of the two-member cap belongs in the protected invitation-acceptance service (Slice 16), with this trigger as defense-in-depth, not the other way around. This mirrors existing precedent rather than inventing new architecture.
+
+### Row-Level Security (RLS) Strategy
+
+Per `LifeOS-Technical-Handoff.md` "Row-Level-Security Approach" and the
+Foundation slice's requirement that baseline RLS structures land from day
+one: **RLS is enabled on all five tables in this slice**, even though full
+membership-based policies can't be meaningfully exercised until Slice 2
+provides a way to actually create a session.
+
+- `profiles`: a user may `SELECT`/`UPDATE` only their own row (`auth.uid() = id`). No cross-user visibility yet — a public-safe subset for Shared-Space display (e.g., showing the other member's name) is a later slice's concern, not this one.
+- `workspaces`: a user may `SELECT` only workspaces they belong to (via a `workspace_members` join). No client-side `INSERT` policy — workspace creation happens only through the Slice 2 protected sign-up service (server-side, using elevated privileges, not an ordinary authenticated client insert).
+- `workspace_members`: a user may `SELECT` rows for workspaces they belong to (so a member can see that the other membership row exists — this is basic roster information, not "private content" under P6-B). No client-side `INSERT`/`UPDATE`/`DELETE` policy — all writes go through protected services (sign-up, invitation acceptance, member removal).
+- `user_settings`: a user may `SELECT`/`UPDATE` only their own row (`auth.uid() = user_id`).
+- `invitations`: `SELECT`/`INSERT`/`UPDATE` restricted to the Workspace Owner of the relevant workspace (Part 4.1, Owner-only). The invitee — who has no account and thus no membership row yet — cannot be reached via an RLS policy at all; acceptance must be a protected, token-validating service call (Slice 16), not a client-side read.
+
+No polymorphic tables exist in this slice, so D17's "controlled server-side
+write path" requirement applies here in its simplest form: direct client
+writes to any of these five tables are not expected to be the normal path
+for anything except `profiles`/`user_settings` self-updates.
+
+### Rollback Strategy
+
+- Each of the 5 migrations ships with a paired down-migration that drops
+  exactly what its up-migration created (table, indexes, triggers,
+  constraints) — no down-migration touches a table it didn't create.
+- Down-migrations run in **reverse** dependency order:
+  `invitations` → `user_settings` → `workspace_members` → `workspaces` →
+  `profiles`.
+- Rollback is tested against a scratch/dev database only, never production,
+  per the approved Git Workflow ("backups before any production schema
+  change"). A full up → down → up cycle must produce an identical schema
+  each time (verified as part of the Verification Checklist below).
+
+### Testing Strategy
+
+Slice 1 is schema-only, so its testing looks different from a feature
+slice's:
+
+- **Migration apply/rollback verification**: apply all 5 up-migrations to
+  a clean dev database, confirm the expected tables/columns/constraints/
+  indexes/triggers exist, then run the down-migrations in reverse and
+  confirm a clean drop, then re-apply and confirm an identical result.
+- **No RLS *policy behavior* tests yet.** Real cross-workspace/cross-visibility
+  policy tests need an actual way to create two authenticated sessions —
+  that doesn't exist until Slice 2 (sign-up/sign-in). Writing "policy
+  tests" against empty tables with no service layer would be theater, not
+  verification. This is a deliberate, explained deferral to Slice 2 — not
+  a silently skipped Definition-of-Done item.
+- **Known CI gap to flag, not silently work around:** the current CI
+  workflow (`.github/workflows/ci.yml`) has no database service and cannot
+  run live migrations. Before or during this slice, decide whether to (a)
+  extend CI with a local Postgres/Supabase service container so migration
+  apply/rollback is automated, or (b) apply migrations manually to the dev
+  Supabase project and verify via the checklist below, deferring CI
+  automation to a later slice. This decision should be made explicitly,
+  not assumed — see Risks.
+
+### Verification Checklist
+
+- [ ] All 5 up-migrations apply cleanly, in order, to a fresh dev database.
+- [ ] All 5 down-migrations, run in reverse order, drop everything with no orphaned objects (indexes, triggers, constraints) left behind.
+- [ ] A full up → down → up cycle produces an identical schema (diffed, not eyeballed).
+- [ ] Every table has RLS enabled (even where policies are minimal).
+- [ ] Every foreign key, index, and constraint listed above exists exactly as specified (or the deviation is explained in the PR).
+- [ ] `updated_at` triggers fire correctly on update for all 5 tables.
+- [ ] The two-member-per-workspace backstop (trigger or equivalent) rejects a third `workspace_members` row for the same `workspace_id` when manually tested.
+- [ ] The one-pending-invitation-per-workspace partial unique index rejects a second pending invitation when manually tested.
+- [ ] No other environment (staging/production) was touched by this testing.
+- [ ] `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all still pass (no application code changed, so this should be a no-op, but confirm).
+
+### Definition of Done (adapted from `DEFINITION_OF_DONE.md` for a schema-only slice)
+
+- [ ] Implementation (migrations) matches this plan, or deviations are explained in the PR.
+- [ ] Unit tests: N/A in the traditional sense (no services yet) — the Verification Checklist above stands in for this item; note this explicitly in the PR rather than leaving the checklist item silently blank.
+- [ ] Policy tests: explicitly deferred to Slice 2, with the reason stated (no session-creation path exists yet) — not skipped without explanation.
+- [ ] Playwright / accessibility: N/A — no UI in this slice.
+- [ ] TypeScript clean, ESLint clean, production build passes (unaffected by a schema-only change, but confirm — a Supabase-generated types file, if added, must typecheck).
+- [ ] Documentation updated: `PROJECT_STATUS.md` (Slice Completion table), `NEXT_STEPS.md` (mark Slice 1 complete), `db/migrations/README.md` (replace its current placeholder note).
+- [ ] No architectural violations: nothing here duplicates a Layer 1 service, nothing here builds Space visibility (that's Slice 4), the word "workspace" appears only in code/DB, never in any UI copy (there is no UI in this slice).
+- [ ] No prohibited terminology in any comment, commit message, or generated documentation.
+- [ ] Migrations numbered, each with a working, tested down-migration.
+- [ ] Pull request created against `main`, referencing D18 and the amendment Parts 4/7 this slice's schema anticipates.
+
+### Estimated Implementation Size
+
+**Small–Medium.** Five small migration files (plus down-migrations) and no
+application code. The bulk of the effort is in getting the constraints,
+indexes, and RLS-enablement right the first time, and in deciding the CI/
+migration-testing question (see Risks) — not in volume of SQL.
+
+### Risks
+
+1. **The original field-level schema document isn't in this repository.**
+   `Database-Schema-Design.md` (and its audit) are referenced throughout
+   the compact planning package as historical sources, but only the
+   compact package itself (`LifeOS-Source-of-Truth.md`,
+   `LifeOS-Technical-Handoff.md`, the Decision Register, the amendment) is
+   physically present in `/docs`. This plan reconstructs a reasonable
+   schema from those compact descriptions, but exact field-level specifics
+   beyond what's stated (precise additional columns, naming conventions
+   used in the original) were not — and could not be — checked against the
+   original document. **If you still have that original document, it
+   should be checked against this plan before writing real SQL.**
+2. **CI cannot currently test real migrations** — no database service
+   exists in `.github/workflows/ci.yml`. Needs an explicit decision (see
+   Testing Strategy) before or during this slice, not an assumption either
+   way.
+3. **Supabase's own `auth.users` integration pattern** (e.g., a
+   `handle_new_user()` trigger vs. an application-level insert into
+   `profiles`) is a common, well-documented Supabase pattern but isn't
+   spelled out in the compact planning docs — an implementation choice to
+   make at build time, not a deviation from architecture either way.
+4. **Branch protection isn't fully wired yet** (per the Slice 0 residual
+   item) — the PR for this slice should still pass CI cleanly, but the
+   safety net isn't currently enforced at the GitHub level.
+
+### Assumptions (flagged for confirmation, not yet locked in)
+
+1. `profiles.id` is the same UUID as `auth.users.id` (shared primary key) — the standard Supabase pattern, not a separate identity column.
+2. Soft-deletion (Trash/Restore, D23, uniform 30-day retention) does **not** apply to these five identity/ownership tables — Trash/Restore is scoped to user-content records (Tasks, Notes, etc.) per the Source of Truth's "Archive, Trash, and Recovery" section; member removal and workspace archival are distinct, purpose-built protected operations, not generic soft-delete. Worth an explicit yes/no before implementation.
+3. The two-member cap and single-owner invariant are enforced primarily at the service layer (Slices 2/16), with database constraints/triggers as defense-in-depth — following D17's stated precedent, not inventing a new pattern.
+4. Five separate migration files (one per table) rather than one combined stage-1 migration — an implementation-granularity choice, open to being overridden.
+5. RLS is enabled on all five tables immediately, even though policies can't be exercised end-to-end until Slice 2 provides a session-creation path.
+
+### Files That Will Be Created or Modified
+
+- `db/migrations/0001_profiles.sql` + down-migration (new)
+- `db/migrations/0002_workspaces.sql` + down-migration (new)
+- `db/migrations/0003_workspace_members.sql` + down-migration (new)
+- `db/migrations/0004_user_settings.sql` + down-migration (new)
+- `db/migrations/0005_invitations.sql` + down-migration (new)
+- `db/migrations/README.md` (modified — replace the current "no migrations exist yet" placeholder)
+- `project/PROJECT_STATUS.md` (modified — Slice Completion table)
+- `project/NEXT_STEPS.md` (modified — mark Slice 1 complete)
+- **Not touched in this slice:** any file under `/app`, `/components`, `/lib/services`, `/lib/queries`, `/lib/validation` — no application code begins until Slice 2.
 
 ---
 
