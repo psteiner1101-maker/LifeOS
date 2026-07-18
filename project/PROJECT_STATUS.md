@@ -1,7 +1,8 @@
 # LifeOS Project Status
 
-*Last updated: 2026-07-17, repository checkpoint after PR #2 merge — Slice 0
-(Infrastructure) complete.*
+*Last updated: 2026-07-18, repository checkpoint after Slice 1's database
+schema was implemented and clean-room verified — Slice 0 (Infrastructure)
+and Slice 1 (Database Schema) complete.*
 
 This file is a snapshot, not a planning document. It describes where the
 repository and its infrastructure actually stand today. It is expected to go
@@ -31,9 +32,13 @@ PR #2 (CI workflow) is merged into `main` *(verified by GitHub metadata)*,
 the `chore/infra-provisioning` branch has been deleted *(verified by GitHub
 metadata)*, the repository is now public *(verified by GitHub metadata)*, and
 Vercel preview and production deployments are succeeding *(verified by GitHub
-metadata — see "Vercel Status")*. No LifeOS feature, no database schema, and
-no authentication exists yet — the deployed application is still the empty
-foundation shell from Phase 1.
+metadata — see "Vercel Status")*. **Slice 1's database schema (five
+migrations: `profiles`, `workspaces`, `workspace_members`, `user_settings`,
+`invitations`) is now implemented and locally verified** *(verified by
+repository evidence — see "Database Schema Status (Slice 1)")*, though not
+yet confirmed applied to the actual Supabase project. No LifeOS feature, no
+authentication, and no RLS exists yet — the deployed application is still
+the empty foundation shell from Phase 1.
 
 **One structural note carried forward from this checkpoint:** the `/project`
 engineering-operating-system files (this one included) exist only on the
@@ -105,12 +110,58 @@ URL, this line can be completed.
 **Project created and connected — user-reported, not independently
 verified this session.** No GitHub-metadata or repository evidence
 confirms the Supabase project directly (this session has no Supabase API
-access); env var correctness rests on your report. Unchanged and
-*verified by repository evidence*: **no tables, no RLS policies, no
-migrations, no seed data exist** — `db/migrations` is still empty,
-correctly, since schema work starts at `NEXT_STEPS.md` Slice 1 and this
-session was instructed not to write migrations. Creating the project is
-infrastructure; it does not itself advance database readiness.
+access); env var correctness rests on your report.
+
+**Database schema:** Slice 1's five migrations now exist in
+`db/migrations/` and are locally verified — see "Database Schema Status
+(Slice 1)" below. This is *repository evidence*, distinct from the
+Supabase project's actual state: **whether these migrations have been
+applied to the real Supabase project is not confirmed by this session** —
+no Supabase API/CLI access exists here. No RLS policies exist anywhere in
+the schema (deferred by design, not yet built — see "Database Schema
+Status (Slice 1)"). Creating the project is infrastructure; applying and
+confirming the schema against it is a separate, still-outstanding step.
+
+## Database Schema Status (Slice 1)
+
+**Slice 1 database schema is complete — verified by repository evidence.**
+Migrations `0001_profiles`, `0002_workspaces`, `0003_workspace_members`,
+`0004_user_settings`, `0005_invitations` (each with a paired
+down-migration) are implemented in `db/migrations/`, per
+`project/architecture/ACR-001-Slice-1-Identity-and-Workspace-Schema.md`.
+Each migration was individually reviewed and manually verified against a
+local PostgreSQL 16 instance before being committed.
+
+**Clean-room verification** (a separate, full-chain pass covering all five
+migrations together, PostgreSQL 16, this session — *verified by repository
+evidence*):
+- Fresh apply of all five up-migrations, `0001 → 0005`, in order,
+  succeeded.
+- All 26 combined behavioral checks passed — covering the
+  `profiles`/`auth.users` relationship, workspace membership rules,
+  two-active-member enforcement, `user_settings` cascade behavior,
+  invitation constraints and lifecycle uniqueness, `updated_at` trigger
+  behavior on every trigger-backed table, and the full foreign-key
+  delete-behavior matrix (`CASCADE` vs. `NO ACTION`).
+- Full rollback, `0005 → 0001`, succeeded, leaving **zero** Slice 1
+  tables, functions, triggers, or indexes in the `public` schema.
+- Reapplying `0001 → 0005` afterward reproduced a schema identical to the
+  first fresh apply.
+- **No discrepancies were found.**
+
+**What this does and does not mean:** the schema is implemented and
+verified against local scratch databases in this repository's development
+environment. **Whether these migrations have been applied to the actual
+Supabase project is not confirmed by this session** — applying them to the
+real dev/production Supabase project, and confirming that application,
+remains a separate, outstanding step, distinct from the schema's
+implementation and local verification.
+
+**Not implemented — explicitly out of scope for Slice 1:** authentication,
+RLS (no `ENABLE ROW LEVEL SECURITY`, no policies, on any table — deferred
+in full to a future slice, see `NEXT_STEPS.md`), service-layer logic
+(`/lib/services` remains empty), invitation delivery and acceptance,
+automatic invitation expiration, and all later-slice application work.
 
 ## Vercel Status
 
@@ -167,7 +218,7 @@ creating these projects, but that detail hasn't been confirmed here.
 | Slice | Status |
 |---|---|
 | Slice 0 — Infrastructure Provisioning | **Complete** — Supabase + Vercel projects provisioned (user-reported), CI merged and green, repository public (all *verified by GitHub metadata*). One residual item: the CI check is not yet attached as a *required* status check on `main`'s branch protection rule (see "GitHub Status"). |
-| Slice 1 — Foundation: Identity & Workspace Migrations | Not started — see the detailed execution plan in `NEXT_STEPS.md` |
+| Slice 1 — Foundation: Identity & Workspace Migrations | **Database schema complete** — migrations 0001–0005 implemented, individually reviewed/verified, and clean-room verified (see "Database Schema Status (Slice 1)"). Authentication, RLS, service-layer logic, and invitation delivery/acceptance are separate, unimplemented later-slice work — see `NEXT_STEPS.md`. |
 
 ## Phase Completion (`LifeOS-Technical-Handoff.md` numbering)
 
@@ -227,22 +278,37 @@ this line.
 5. **Operational choices still open** (`Private-Hosting-and-Two-Person-Access-Amendment.md` Part 12.6): the P7-A email provider, custom domain, and backup cadence haven't been confirmed to this session (account topology is presumably resolved by the projects now existing).
 6. **Documentation staleness noted, not fixed** (frozen by design): `Private-Hosting-and-Two-Person-Access-Amendment.md` §12.2 still calls D30 "still pending approval" while the Decision Register lists it Approved.
 7. **`npm audit`: 2 moderate advisories**, both in a `postcss` copy bundled inside Next.js's own `node_modules` — not fixable without downgrading Next.js to an old canary; tracked as an upstream issue, not a project defect.
+8. **Slice 1 migrations not yet confirmed applied to the actual Supabase
+   project.** They are implemented and locally verified (individually, and
+   via clean-room full-chain verification, this session) but this session
+   has no Supabase API/CLI access to apply or confirm them against the
+   real dev/production project.
 
 *(Resolved since the previous version of this file: CI workflow merged and
 green — verified by GitHub metadata; repository confirmed public — verified
 by GitHub metadata; `chore/infra-provisioning` confirmed deleted — verified
-by GitHub metadata.)*
+by GitHub metadata. New since the previous version: Slice 1 database
+schema implemented and clean-room verified — verified by repository
+evidence.)*
 
 ## Next Recommended Milestone
 
-**Two small process items, then Slice 1.** (1) Attach the "Lint, typecheck,
-test, build" check as a required status check on `main`'s existing
-protection rule (a few clicks in GitHub Settings — see Open Issue #1), and
-confirm the rest of the branch-protection configuration there since this
-session can't read it. (2) Decide what to do with `/project` (merge it into
-`main` or leave it be). Neither blocks starting **Slice 1 — Foundation:
-Identity & Workspace Migrations** (`feat/foundation-identity-migrations`) on
-its own technical merits, but both are cheap to close out and keep the
-repository's actual state matching what `DEVELOPMENT_RULES.md` and
-`LifeOS-Technical-Handoff.md`'s Git Workflow call for. See `NEXT_STEPS.md`
-for the detailed Slice 1 execution plan.
+**Slice 1's database schema is complete.** Small process items remain open
+regardless of that: (1) attach the "Lint, typecheck, test, build" check as
+a required status check on `main`'s existing protection rule (a few clicks
+in GitHub Settings — see Open Issue #1), and confirm the rest of the
+branch-protection configuration there since this session can't read it;
+(2) decide what to do with `/project` (merge it into `main` or leave it
+be, Open Issue #3); (3) apply and confirm the Slice 1 migrations against
+the actual Supabase project (Open Issue #8).
+
+**Next recommended milestone: Slice 2 planning and architecture review —
+not implementation.** Slice 2 (Sign-Up, Sign-In, Closed Sign-Up Posture) is
+the next roadmap item per `NEXT_STEPS.md`, but no plan for it has been
+reviewed or approved, and nothing in this document authorizes beginning
+Slice 2 implementation. Following the same discipline applied to Slice 1
+(an ACR-style decision-by-decision review, then a separate and explicit
+implementation authorization), Slice 2 requires its own reviewed and
+approved implementation plan — covering the sign-up/sign-in transaction
+detail, session handling, and closed-sign-up enforcement — before any
+code or migration for it is written.

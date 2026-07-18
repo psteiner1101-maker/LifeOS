@@ -3,7 +3,11 @@
 _Roadmap baseline: 2026-07-17, immediately after Phase 1 (project foundation
 scaffold). Updated 2026-07-17 at the Slice 0 checkpoint: Slice 0 is complete
 (PR #2 merged, CI green, repository public — all verified by GitHub
-metadata); Slice 1 is expanded below into a detailed execution plan._
+metadata); Slice 1 is expanded below into a detailed execution plan.
+Updated 2026-07-18: Slice 1's database schema is complete (migrations
+0001–0005 implemented, individually reviewed/verified, and clean-room
+verified — see the Slice 1 section below). Authentication, RLS, and all
+later-slice work remain unimplemented._
 
 This roadmap breaks the approved architecture into concrete, git-branch-sized
 slices. It follows the phase order in `LifeOS-Technical-Handoff.md`
@@ -54,9 +58,26 @@ Expectations").
 
 ## Slice 1 — Foundation: Identity & Workspace Migrations
 
-**Branch:** `feat/foundation-identity-migrations`
-**Status:** Not started. **ACR-001 review complete — 17/17 decisions
-approved. Implementation remains gated — see below.**
+**Branch:** implemented directly on `claude/lifeos-docs-upload-s5nyrn` (not
+yet merged to `main`)
+**Status:** **Database schema complete.** All 17 ACR-001 decisions were
+approved, then migrations `0001_profiles` → `0005_invitations` were
+implemented one at a time, each individually reviewed and manually
+verified, then the complete five-migration chain passed a separate
+clean-room verification on PostgreSQL 16: fresh apply `0001 → 0005`
+succeeded; all 26 combined behavioral checks passed (identity/`auth.users`
+linkage, workspace membership rules, two-active-member enforcement,
+`user_settings` cascade behavior, invitation constraints and lifecycle
+uniqueness, `updated_at` trigger behavior on every trigger-backed table,
+and the full foreign-key delete-behavior matrix); full rollback
+`0005 → 0001` succeeded, leaving zero Slice 1 tables, functions, triggers,
+or indexes in `public`; reapplying `0001 → 0005` reproduced a schema
+identical to the first fresh apply; no discrepancies were found.
+
+**This is schema completion only.** Authentication, RLS, service-layer
+logic, invitation delivery and acceptance, automatic invitation
+expiration, and every other later-slice item below (Slice 2 onward)
+remain entirely unimplemented.
 
 **Schema source-of-truth update:** the original `Database-Schema-Design.md`
 and its audit amendment are confirmed permanently unavailable (see
@@ -67,16 +88,18 @@ decision-by-decision — all 17 field-level decisions are now approved:
 
 **→ [`project/architecture/ACR-001-Slice-1-Identity-and-Workspace-Schema.md`](./architecture/ACR-001-Slice-1-Identity-and-Workspace-Schema.md)**
 
-**Approval gate: reviewing and approving ACR-001's 17 individual decisions
-is not, by itself, authorization to begin implementation.** No migration,
-SQL, authentication implementation, or application feature work for this
-slice may begin until the project owner separately approves ACR-001 as a
-finalized whole and explicitly authorizes implementation to proceed — a
-distinct, further go-ahead per the project owner's own instruction. The
-execution-plan outline below (kept for the process structure — objective,
-testing strategy, verification checklist, DoD, files) is superseded on
-schema specifics by ACR-001 wherever the two differ; ACR-001 governs
-field-level detail.
+**Historical note — approval gate satisfied:** reviewing and approving
+ACR-001's 17 individual decisions was, by itself, not authorization to
+begin implementation. ACR-001 was separately approved as a finalized whole
+and implementation was explicitly authorized before any migration was
+written — the two-step gate described in earlier revisions of this
+document, and in ACR-001 §11, is recorded here as satisfied, not removed
+from history. The execution-plan outline below (kept for the process
+structure — objective, testing strategy, verification checklist, DoD,
+files) was superseded on schema specifics by ACR-001 wherever the two
+differed; ACR-001 governed field-level detail. **One specific, deliberate
+deviation from this outline** is recorded in "Row-Level Security (RLS)
+Strategy" below.
 
 ### Objective
 
@@ -164,11 +187,23 @@ and `invitations` both depend on rows existing in `workspaces` and
 
 ### Row-Level Security (RLS) Strategy
 
+**Superseded by explicit instruction during implementation — RLS was
+deferred in full, not partially enabled.** This section's original plan
+below was not what was built: per explicit, repeated instruction during
+Migrations 0001–0005's implementation, **no `ENABLE ROW LEVEL SECURITY`
+statement and no `CREATE POLICY` statement exists anywhere in the five
+committed migrations.** RLS remains entirely future work, to be
+implemented and reviewed as its own slice — it is not partially in place.
+The per-table policy intent below is preserved as a record of the original
+plan and remains a reasonable starting point for that future slice, but
+none of it has been built yet.
+
 Per `LifeOS-Technical-Handoff.md` "Row-Level-Security Approach" and the
-Foundation slice's requirement that baseline RLS structures land from day
-one: **RLS is enabled on all five tables in this slice**, even though full
-membership-based policies can't be meaningfully exercised until Slice 2
-provides a way to actually create a session.
+Foundation slice's original requirement that baseline RLS structures land
+from day one, the original plan called for: **RLS enabled on all five
+tables in this slice**, even though full membership-based policies can't
+be meaningfully exercised until Slice 2 provides a way to actually create
+a session.
 
 - `profiles`: a user may `SELECT`/`UPDATE` only their own row (`auth.uid() = id`). No cross-user visibility yet — a public-safe subset for Shared-Space display (e.g., showing the other member's name) is a later slice's concern, not this one.
 - `workspaces`: a user may `SELECT` only workspaces they belong to (via a `workspace_members` join). No client-side `INSERT` policy — workspace creation happens only through the Slice 2 protected sign-up service (server-side, using elevated privileges, not an ordinary authenticated client insert).
@@ -220,29 +255,29 @@ slice's:
 
 ### Verification Checklist
 
-- [ ] All 5 up-migrations apply cleanly, in order, to a fresh dev database.
-- [ ] All 5 down-migrations, run in reverse order, drop everything with no orphaned objects (indexes, triggers, constraints) left behind.
-- [ ] A full up → down → up cycle produces an identical schema (diffed, not eyeballed).
-- [ ] Every table has RLS enabled (even where policies are minimal).
-- [ ] Every foreign key, index, and constraint listed above exists exactly as specified (or the deviation is explained in the PR).
-- [ ] `updated_at` triggers fire correctly on update for all 5 tables.
-- [ ] The two-member-per-workspace backstop (trigger or equivalent) rejects a third `workspace_members` row for the same `workspace_id` when manually tested.
-- [ ] The one-pending-invitation-per-workspace partial unique index rejects a second pending invitation when manually tested.
-- [ ] No other environment (staging/production) was touched by this testing.
-- [ ] `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all still pass (no application code changed, so this should be a no-op, but confirm).
+- [x] All 5 up-migrations apply cleanly, in order, to a fresh dev database. — confirmed by clean-room verification (fresh apply and final reapply), PostgreSQL 16, this session.
+- [x] All 5 down-migrations, run in reverse order, drop everything with no orphaned objects (indexes, triggers, constraints) left behind. — confirmed; zero Slice 1 tables/functions/triggers/indexes remained in `public`.
+- [x] A full up → down → up cycle produces an identical schema (diffed, not eyeballed). — confirmed; the reapplied schema matched the first fresh apply, table by table.
+- [ ] Every table has RLS enabled (even where policies are minimal). — **not done; deferred in full, see "Row-Level Security (RLS) Strategy" above.**
+- [x] Every foreign key, index, and constraint listed above exists exactly as specified (or the deviation is explained in the PR). — confirmed against ACR-001, the authoritative source (supersedes this outline's own constraint list wherever they differ — see each migration's commit message for specifics).
+- [x] `updated_at` triggers fire correctly on update for all 5 tables. — confirmed (real-change and no-op-update behavior both verified per table).
+- [x] The two-member-per-workspace backstop (trigger or equivalent) rejects a third `workspace_members` row for the same `workspace_id` when manually tested. — confirmed, including a real two-session concurrency test (Migration 0003 verification).
+- [x] The one-pending-invitation-per-workspace partial unique index rejects a second pending invitation when manually tested. — confirmed, including a full accepted/revoked/expired lifecycle re-test in clean-room verification.
+- [x] No other environment (staging/production) was touched by this testing. — confirmed; all verification used local scratch PostgreSQL databases only.
+- [ ] `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` all still pass (no application code changed, so this should be a no-op, but confirm). — **not re-run as part of this documentation pass.** No application code was touched by Migrations 0001–0005 (SQL files only), so this remains expected to be a no-op, but hasn't been explicitly re-confirmed.
 
 ### Definition of Done (adapted from `DEFINITION_OF_DONE.md` for a schema-only slice)
 
-- [ ] Implementation (migrations) matches this plan, or deviations are explained in the PR.
-- [ ] Unit tests: N/A in the traditional sense (no services yet) — the Verification Checklist above stands in for this item; note this explicitly in the PR rather than leaving the checklist item silently blank.
-- [ ] Policy tests: explicitly deferred to Slice 2, with the reason stated (no session-creation path exists yet) — not skipped without explanation.
-- [ ] Playwright / accessibility: N/A — no UI in this slice.
-- [ ] TypeScript clean, ESLint clean, production build passes (unaffected by a schema-only change, but confirm — a Supabase-generated types file, if added, must typecheck).
-- [ ] Documentation updated: `PROJECT_STATUS.md` (Slice Completion table), `NEXT_STEPS.md` (mark Slice 1 complete), `db/migrations/README.md` (replace its current placeholder note).
-- [ ] No architectural violations: nothing here duplicates a Layer 1 service, nothing here builds Space visibility (that's Slice 4), the word "workspace" appears only in code/DB, never in any UI copy (there is no UI in this slice).
-- [ ] No prohibited terminology in any comment, commit message, or generated documentation.
-- [ ] Migrations numbered, each with a working, tested down-migration.
-- [ ] Pull request created against `main`, referencing D18 and the amendment Parts 4/7 this slice's schema anticipates.
+- [x] Implementation (migrations) matches this plan, or deviations are explained in the PR. — matches ACR-001 (the authoritative source); the RLS deviation is explained above, not silent.
+- [x] Unit tests: N/A in the traditional sense (no services yet) — the Verification Checklist above stands in for this item; noted explicitly rather than left silently blank.
+- [x] Policy tests: explicitly deferred to Slice 2, with the reason stated (no session-creation path exists yet) — not skipped without explanation.
+- [x] Playwright / accessibility: N/A — no UI in this slice.
+- [ ] TypeScript clean, ESLint clean, production build passes (unaffected by a schema-only change, but confirm — a Supabase-generated types file, if added, must typecheck). — **not explicitly re-run as part of this documentation pass;** no application code was touched, so this remains expected to be a no-op.
+- [x] Documentation updated: `PROJECT_STATUS.md` (Slice Completion table), `NEXT_STEPS.md` (this update), `db/migrations/README.md` (placeholder replaced).
+- [x] No architectural violations: nothing here duplicates a Layer 1 service, nothing here builds Space visibility (that's Slice 4), the word "workspace" appears only in code/DB, never in any UI copy (there is no UI in this slice).
+- [x] No prohibited terminology in any comment, commit message, or generated documentation.
+- [x] Migrations numbered, each with a working, tested down-migration.
+- [ ] Pull request created against `main`, referencing D18 and the amendment Parts 4/7 this slice's schema anticipates. — **not done.** The migrations are committed to `claude/lifeos-docs-upload-s5nyrn`; no dedicated pull request has been opened or updated for this slice specifically.
 
 ### Estimated Implementation Size
 
