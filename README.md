@@ -6,10 +6,15 @@ documents (start with `LifeOS-Master-Reference.md`).
 
 ## Project state
 
-**Phase 1 (project foundation) only.** This repository currently contains
-project scaffolding and tooling configuration — no LifeOS features, no
-database schema, and no authentication have been implemented yet. See
-`/docs/LifeOS-Implementation-Blueprint.md` for the full phase plan.
+**Phase 1 (project foundation) and Slice 1 (database schema) are complete.**
+The five identity/workspace-ownership migrations (`profiles`, `workspaces`,
+`workspace_members`, `user_settings`, `invitations`) are implemented,
+verified, and merged. No LifeOS feature, authentication, or RLS beyond a
+minimal planned baseline exists yet — see `project/PROJECT_STATUS.md` for
+the current, verified state of the repository, and
+`project/NEXT_STEPS.md` for the full roadmap and the next slice's
+fully-planned (not yet implemented) design. New to this repository? Start
+at `project/RECOVERY.md`; for local setup, see `project/SETUP.md`.
 
 ## Stack
 
@@ -50,7 +55,7 @@ Playwright · axe-core.
 /lib/queries            Read helpers, incl. shared visibility/privacy query helper (future)
 /lib/validation         Zod schemas shared by client and server (future)
 /lib/dates              date-fns wrappers, time-zone resolution (future)
-/db/migrations          Numbered, ordered SQL migrations (future)
+/db/migrations          Numbered, ordered SQL migrations (Slice 1 schema implemented)
 /jobs                   Supabase Scheduled Function sources (future)
 /tests/unit             Vitest
 /tests/e2e              Playwright
