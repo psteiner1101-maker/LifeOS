@@ -336,23 +336,315 @@ migration-testing question (see Risks) — not in volume of SQL.
 
 ## Slice 2 — Foundation: Sign-Up, Sign-In, Closed Sign-Up Posture
 
+**Status:** Planning and security review complete and approved. **Implementation
+not yet started** — this section is the full, reviewed plan, not a report of
+work done. It supersedes the original short stub this section used to
+contain; nothing here has been implemented, tested against a real database,
+or committed.
+
 - **Objective:** The approved one-transaction sign-up (Auth user, profile,
   workspace, owner `workspace_members` row, default `user_settings`),
   sign-in, sign-out, password reset, and closed-sign-up enforcement (public
   sign-up disabled after the first account) — the invitation _acceptance_
   path itself is deferred to Slice 16.
-- **Estimated complexity:** High — first protected-write service, first
-  policy tests, first real auth surface.
+- **Estimated complexity:** High — first protected-write service, first RLS
+  policies, first RPC function, first real auth surface.
 - **Dependencies:** Slice 1.
-- **Files likely to change:** `lib/services/signUp.ts`, `app/auth/*` (new,
-  rebuilt from scratch — not the removed starter pages), `lib/validation/auth.ts`,
-  `tests/unit/services/signUp.test.ts`, `tests/policies/cross-workspace.test.ts`.
-- **Testing required:** Unit tests for the sign-up transaction including
-  partial-failure rollback; cross-workspace policy tests; Playwright for the
-  sign-up → sign-in → sign-out journey.
 - **Definition of Done:** Full `DEFINITION_OF_DONE.md` checklist; closed
   sign-up verified by a release-blocking test (amendment 12.2).
 - **Suggested branch:** `feat/foundation-auth`
+
+### Security baseline decisions (approved)
+
+1. **RLS is no longer fully deferred.** Slice 1 shipped with zero RLS by
+   explicit instruction; Slice 2 closes that exposure gap with a
+   _minimum, intentionally narrow_ baseline — not the full RLS-hardening
+   pass still planned for Slice 6. Users may read their own `profiles` row
+   and their own `user_settings` row; nothing else is granted to any
+   client role; all onboarding writes go through a single
+   `SECURITY DEFINER` RPC callable only by `service_role`.
+2. **Onboarding is one PostgreSQL RPC function**, not TypeScript-orchestrated
+   inserts — atomic by construction (a single function call is one
+   transaction), idempotent, and callable only from trusted server-side
+   code (enforced by database grant, not by an internal identity check).
+3. **Email confirmation is required before onboarding runs.** The
+   profile/workspace/membership/settings transaction fires only after the
+   user clicks the confirmation link and the callback exchanges the code
+   for a session — never at the initial `signUp()` call.
+4. **Time zone** is detected client-side
+   (`Intl.DateTimeFormat().resolvedOptions().timeZone`), carried through
+   Supabase Auth user metadata (survives the email round-trip across
+   devices), and defaults to `'UTC'` only if detection fails.
+5. **Closed sign-up is enforced in application/server logic**, checked
+   before any Auth user is created; Supabase's own project-level sign-up
+   toggle is a secondary, manual operational safeguard, not the primary
+   mechanism.
+6. **`/app` is the temporary authenticated landing route** — a minimal
+   placeholder; the real Dashboard remains Slice 3.
+7. **Password policy:** minimum 12 characters, no other complexity rules
+   unless Supabase's own project settings require them.
+8. **Onboarding retry/idempotency logic lives entirely inside the RPC** —
+   the server-side caller never duplicates multi-table recovery logic.
+
+### Exact migrations required
+
+**`0006_auth_rls_baseline`** — enables RLS on all five Slice 1 tables
+(closing the exposure gap on all of them, not just the two that get real
+policies) and adds exactly two policies:
+
+```sql
+alter table profiles enable row level security;
+alter table user_settings enable row level security;
+alter table workspaces enable row level security;
+alter table workspace_members enable row level security;
+alter table invitations enable row level security;
+
+create policy profiles_select_own
+  on profiles for select
+  to authenticated
+  using (auth.uid() = id);
+
+create policy user_settings_select_own
+  on user_settings for select
+  to authenticated
+  using (auth.uid() = user_id);
+```
+
+No `INSERT`/`UPDATE`/`DELETE` policy on any table, and no `SELECT` policy on
+`workspaces`/`workspace_members`/`invitations` — even self-row `UPDATE` on
+`profiles`/`user_settings` is deliberately not granted yet, since no
+settings-editing feature exists in this slice.
+
+**`0007_onboarding_rpc`** — the atomic, idempotent onboarding function
+(see "RPC behavior and idempotency states" below for the full design and
+rationale):
+
+```sql
+create or replace function complete_onboarding(
+  p_user_id uuid,
+  p_time_zone text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_workspace_id uuid;
+  v_time_zone text := coalesce(nullif(p_time_zone, ''), 'UTC');
+  v_existing_role text;
+  v_existing_status text;
+begin
+  insert into profiles (id)
+  values (p_user_id)
+  on conflict (id) do nothing;
+
+  perform 1 from profiles where id = p_user_id for update;
+
+  select wm.role, wm.status, wm.workspace_id
+    into v_existing_role, v_existing_status, v_workspace_id
+  from workspace_members wm
+  where wm.user_id = p_user_id
+  order by wm.created_at
+  limit 1;
+
+  if v_existing_role = 'owner' and v_existing_status = 'active' then
+    return v_workspace_id;
+  end if;
+
+  if v_existing_role = 'member' then
+    raise exception using
+      errcode = 'LI002',
+      message = 'complete_onboarding called for a user who is already a workspace member',
+      constraint = 'onboarding_not_for_existing_member';
+  end if;
+
+  if v_existing_role = 'owner' and v_existing_status = 'removed' then
+    raise exception using
+      errcode = 'LI003',
+      message = 'complete_onboarding called for a user with a removed owner membership; no approved recovery path exists',
+      constraint = 'onboarding_no_removed_owner_path';
+  end if;
+
+  insert into workspaces default values
+  returning id into v_workspace_id;
+
+  insert into workspace_members (workspace_id, user_id, role, status)
+  values (v_workspace_id, p_user_id, 'owner', 'active');
+
+  insert into user_settings (user_id, time_zone)
+  values (p_user_id, v_time_zone)
+  on conflict (user_id) do nothing;
+
+  return v_workspace_id;
+end;
+$$;
+
+revoke all on function complete_onboarding(uuid, text) from public, anon, authenticated;
+grant execute on function complete_onboarding(uuid, text) to service_role;
+```
+
+`LI002`/`LI003` continue the stable-error-identifier convention established
+(and approved) for `LI001` in Migration 0003's two-member-limit trigger.
+
+### RPC caller security model (Design B — approved)
+
+Compared against an alternative (an `authenticated`-callable RPC that
+trusts `auth.uid()` internally): granting `EXECUTE` only to `service_role`
+closes the client-facing attack surface at the database grant level
+entirely, rather than depending on an internal SQL identity check never
+regressing. `auth.uid()` is not meaningful under `service_role` calls, so
+the RPC trusts `p_user_id` — safe only because the sole caller is our own
+server-side callback code, which must always derive `p_user_id` from the
+`user.id` of the just-established session (`exchangeCodeForSession()`
+result), never from any client-supplied form field or query parameter.
+**This requires `SUPABASE_SERVICE_ROLE_KEY`** (server-only, never
+`NEXT_PUBLIC_`, used only inside `lib/supabase/admin.ts` and
+`lib/services/onboarding.ts`).
+
+### RPC behavior and idempotency states (approved)
+
+Locking strategy: `INSERT ... ON CONFLICT (id) DO NOTHING` into `profiles`
+first, then `SELECT ... FOR UPDATE` on that row — a real, guaranteed-to-exist
+row to serialize concurrent calls on, mirroring the `SELECT ... FOR UPDATE`
+pattern already approved for Migration 0003's two-member-limit trigger,
+rather than an advisory lock.
+
+| State                                           | Behavior                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No onboarding rows exist                        | Lock acquired on the newly-inserted `profiles` row; no membership found → create `workspaces`, owner `workspace_members`, `user_settings`.                                                                                                                                                                                     |
+| Profile exists only                             | `profiles` insert no-ops; proceed as above.                                                                                                                                                                                                                                                                                    |
+| Profile and settings exist but no membership    | `user_settings` insert also no-ops (preserves the original `time_zone`); only `workspaces` + `workspace_members` are newly created.                                                                                                                                                                                            |
+| Workspace exists but no membership (orphan)     | **Not recoverable by this function** — `workspaces` has no `user_id` column (ACR-001 Decision 3), so there is no way to discover an orphan belongs to a given user. Cannot arise from normal atomic operation of this function; would need a separate audit/cleanup process if it ever occurred through external intervention. |
+| Active owner membership exists                  | Short-circuits immediately: returns the existing `workspace_id`, zero writes.                                                                                                                                                                                                                                                  |
+| Removed membership exists                       | Explicit rejection (`LI003`) — no approved document describes owner removal/reactivation; never silently reactivated.                                                                                                                                                                                                          |
+| User already belongs to a workspace as a Member | Explicit rejection (`LI002`) — never silently promotes an existing Member to Owner or creates a second workspace for them.                                                                                                                                                                                                     |
+| Two concurrent onboarding calls                 | The row-lock serializes them; the second blocks until the first commits, then observes the already-committed owner membership and no-ops via the "active owner membership exists" case.                                                                                                                                        |
+
+### RLS access matrix (approved)
+
+| Object                               | `anon` | `authenticated` | `service_role`                                                | Inside the RPC (`SECURITY DEFINER`)       |
+| ------------------------------------ | ------ | --------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| `profiles` SELECT                    | ✗      | ✓ own row only  | ✓                                                             | ✓ (bypasses RLS; not used)                |
+| `profiles` INSERT/UPDATE/DELETE      | ✗      | ✗               | ✓                                                             | INSERT only (`ON CONFLICT DO NOTHING`)    |
+| `user_settings` SELECT               | ✗      | ✓ own row only  | ✓                                                             | not used                                  |
+| `user_settings` INSERT/UPDATE/DELETE | ✗      | ✗               | ✓                                                             | INSERT only (`ON CONFLICT DO NOTHING`)    |
+| `workspaces` (all ops)               | ✗      | ✗               | ✓ (SELECT used for closed-signup check)                       | INSERT only (`default values`)            |
+| `workspace_members` (all ops)        | ✗      | ✗               | ✓ (SELECT used for closed-signup check)                       | SELECT (state check) + INSERT (owner row) |
+| `invitations` (all ops)              | ✗      | ✗               | ✓ (capability only; unused by Slice 2, reserved for Slice 16) | not used                                  |
+| `complete_onboarding` EXECUTE        | ✗      | ✗               | ✓ (only grant)                                                | N/A                                       |
+
+### Auth routes and pages
+
+| Route                                              | Purpose                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app/auth/sign-up/page.tsx` + `actions.ts`         | Sign-up form; client-side timezone detection; server action checks closed-signup (service-role read), calls `auth.signUp()` with `options.data.time_zone` and `emailRedirectTo`.                                                                                   |
+| `app/auth/sign-in/page.tsx` + `actions.ts`         | Sign-in form and action.                                                                                                                                                                                                                                           |
+| `app/auth/forgot-password/page.tsx` + `actions.ts` | Requests a reset email (always the same generic response, enumeration-resistant).                                                                                                                                                                                  |
+| `app/auth/reset-password/page.tsx` + `actions.ts`  | Sets a new password using an active recovery session.                                                                                                                                                                                                              |
+| `app/auth/callback/route.ts`                       | Exchanges the emailed code for a session; on the confirmation flow, reads `user.user_metadata.time_zone` and calls `completeOnboarding()`; on RPC failure, offers a same-page retry (idempotent, safe); on the recovery flow, redirects to `/auth/reset-password`. |
+| `app/auth/sign-out/route.ts`                       | Signs out, redirects to `/auth/sign-in`.                                                                                                                                                                                                                           |
+| `app/app/page.tsx`                                 | Minimal signed-in placeholder — "You're signed in. The LifeOS Dashboard is coming soon."                                                                                                                                                                           |
+
+### Server/service files
+
+- `lib/supabase/admin.ts` (new) — server-only service-role client, never imported by client components.
+- `lib/services/onboarding.ts` (new) — the only place that calls the `complete_onboarding` RPC; a thin wrapper, no duplicated recovery logic (decision 8).
+- `lib/validation/auth.ts` (new) — Zod schemas: sign-up, sign-in, forgot-password (email), reset-password (password ≥12 chars).
+
+### `/app` gating (approved placement)
+
+A small, narrowly-scoped addition to the **existing** `lib/supabase/proxy.ts`
+(inside `updateSession()`, immediately after the existing `getClaims()`
+call) — not a new file, not a general protected-routes system:
+
+```ts
+const { data } = await supabase.auth.getClaims();
+
+const isAppRoute = request.nextUrl.pathname.startsWith("/app");
+if (isAppRoute && !data?.claims) {
+  const signInUrl = request.nextUrl.clone();
+  signInUrl.pathname = "/auth/sign-in";
+  return NextResponse.redirect(signInUrl);
+}
+
+return supabaseResponse;
+```
+
+Broader route-group protection and feature-level authorization remain
+deferred to Slice 3, per this file's own existing comment.
+
+### Error messages (exact copy, approved)
+
+- Closed sign-up: **"This LifeOS is private. Ask its owner for an invitation."**
+- Sign-in, invalid credentials: **"Incorrect email or password."**
+- Sign-up, unexpected failure: **"Something went wrong creating your account. Please try again."**
+- Password too short: **"Password must be at least 12 characters."**
+- Forgot-password submission (always, enumeration-resistant): **"If an account exists for that email, we've sent password reset instructions."**
+- Expired/used confirmation or recovery link: **"That link has expired or was already used. Please sign in, or request a new one."**
+- Generic network/unexpected error: **"Something went wrong. Please try again."** (input never cleared).
+
+### Environment variables (new)
+
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only.
+- `NEXT_PUBLIC_SITE_URL` — for constructing the absolute `emailRedirectTo` callback URL.
+
+Both are added to `.env.example` (placeholders only) as part of this
+slice's own implementation, not before.
+
+### Files likely to be created or modified
+
+**New:** `db/migrations/0006_auth_rls_baseline.up.sql` / `.down.sql`;
+`db/migrations/0007_onboarding_rpc.up.sql` / `.down.sql`;
+`lib/supabase/admin.ts`; `lib/services/onboarding.ts`;
+`lib/validation/auth.ts`; the seven `app/auth/*` and `app/app/*` files
+listed above; `tests/unit/validation/auth.test.ts`.
+**Modified:** `.env.example`; `lib/supabase/proxy.ts` (small, scoped
+`/app`-gating addition only).
+**Not touched:** anything under `/docs`; any migration before 0006.
+
+### Testing and manual verification plan
+
+- **Automated (Vitest), pure logic only:** Zod schema validation; the
+  timezone-detection-with-`'UTC'`-fallback helper.
+- **Manual, against a local PostgreSQL 16 instance** (same discipline as
+  Slice 1 — no automated DB integration-test infrastructure exists yet,
+  and none is introduced here): migration apply/rollback/reapply for 0006
+  and 0007; RLS verification using a stubbed `auth.uid()` and
+  `SET LOCAL request.jwt.claims` to simulate authenticated sessions; RPC
+  verification against every state in the table above, including the
+  concurrency case.
+- **Honest scope limitation:** true end-to-end policy tests exercising two
+  independent real Supabase Auth sessions aren't achievable in this
+  sandboxed environment (only raw PostgreSQL is available, not the full
+  Supabase Auth/GoTrue stack) — real end-to-end multi-account verification
+  needs the actual Supabase dev project, or later infrastructure.
+- **Cannot be done from this session at all:** real email delivery and
+  link-click verification for confirmation and password reset; confirming
+  the real Supabase project's configured minimum password length doesn't
+  conflict with the 12-character check.
+
+### Implementation order and commit boundaries (approved)
+
+1. Migration 0006 (RLS baseline) — own commit, verified.
+2. Migration 0007 (onboarding RPC) — own commit, verified.
+3. `lib/supabase/admin.ts` + `.env.example` additions — own commit.
+4. `lib/validation/auth.ts` + Vitest tests — own commit.
+5. `lib/services/onboarding.ts` — own commit.
+6. Sign-up page + action (closed-signup check) — own commit.
+7. Auth callback route — own commit.
+8. Sign-in page + action — own commit.
+9. Sign-out route — own commit.
+10. Forgot-password + reset-password pages/actions — own commit.
+11. `/app` placeholder page — own commit.
+12. `/app` gating addition to `lib/supabase/proxy.ts` — own commit.
+13. Documentation update (`PROJECT_STATUS.md`, `NEXT_STEPS.md`) — final
+    commit, only after everything above is implemented and verified.
+
+Each step follows the same one-piece-at-a-time review discipline used
+throughout Slice 1: implement → show exact diff → verify manually → wait
+for approval → commit only that piece → wait for push approval — before
+starting the next.
 
 ---
 
