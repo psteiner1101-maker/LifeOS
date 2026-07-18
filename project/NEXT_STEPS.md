@@ -1,9 +1,9 @@
 # Next Steps — Implementation Roadmap
 
-*Roadmap baseline: 2026-07-17, immediately after Phase 1 (project foundation
+_Roadmap baseline: 2026-07-17, immediately after Phase 1 (project foundation
 scaffold). Updated 2026-07-17 at the Slice 0 checkpoint: Slice 0 is complete
 (PR #2 merged, CI green, repository public — all verified by GitHub
-metadata); Slice 1 is expanded below into a detailed execution plan.*
+metadata); Slice 1 is expanded below into a detailed execution plan._
 
 This roadmap breaks the approved architecture into concrete, git-branch-sized
 slices. It follows the phase order in `LifeOS-Technical-Handoff.md`
@@ -40,12 +40,12 @@ Expectations").
         verified by GitHub metadata (commit-status API).
   - [x] Repository made public — verified by GitHub metadata.
   - [~] Branch protection — **partially done**: a protection rule exists on
-        `main` (verified by GitHub metadata), but the CI check is not yet
-        attached as a *required* status check (`contexts: []`, verified by
-        GitHub metadata), and the rest of the rule's configuration isn't
-        readable by this session's token (403 — needs direct confirmation
-        in GitHub Settings). Marked complete per instruction, with this
-        residual item tracked in `PROJECT_STATUS.md` Open Issues #1–#2.
+    `main` (verified by GitHub metadata), but the CI check is not yet
+    attached as a _required_ status check (`contexts: []`, verified by
+    GitHub metadata), and the rest of the rule's configuration isn't
+    readable by this session's token (403 — needs direct confirmation
+    in GitHub Settings). Marked complete per instruction, with this
+    residual item tracked in `PROJECT_STATUS.md` Open Issues #1–#2.
   - [x] `PROJECT_STATUS.md` updated to reflect real infrastructure.
 - **Suggested branch:** `chore/infra-provisioning` — merged via PR #2, then
   deleted (confirmed via GitHub metadata).
@@ -55,20 +55,39 @@ Expectations").
 ## Slice 1 — Foundation: Identity & Workspace Migrations
 
 **Branch:** `feat/foundation-identity-migrations`
-**Status:** Not started — detailed execution plan below, produced at the
-Slice 0 checkpoint per explicit instruction. **No migration has been
-created and no SQL has been written** — this section is a plan only.
+**Status:** Not started. **ACR-001 review complete — 17/17 decisions
+approved. Implementation remains gated — see below.**
+
+**Schema source-of-truth update:** the original `Database-Schema-Design.md`
+and its audit amendment are confirmed permanently unavailable (see
+`PROJECT_STATUS.md`). Rather than let the plan below's inferred specifics
+silently become real schema, they were formally reconstructed as an
+Architecture Change Request and reviewed with the project owner
+decision-by-decision — all 17 field-level decisions are now approved:
+
+**→ [`project/architecture/ACR-001-Slice-1-Identity-and-Workspace-Schema.md`](./architecture/ACR-001-Slice-1-Identity-and-Workspace-Schema.md)**
+
+**Approval gate: reviewing and approving ACR-001's 17 individual decisions
+is not, by itself, authorization to begin implementation.** No migration,
+SQL, authentication implementation, or application feature work for this
+slice may begin until the project owner separately approves ACR-001 as a
+finalized whole and explicitly authorizes implementation to proceed — a
+distinct, further go-ahead per the project owner's own instruction. The
+execution-plan outline below (kept for the process structure — objective,
+testing strategy, verification checklist, DoD, files) is superseded on
+schema specifics by ACR-001 wherever the two differ; ACR-001 governs
+field-level detail.
 
 ### Objective
 
 Stand up the schema-only foundation for identity and workspace ownership —
 `profiles`, `workspaces`, `workspace_members`, `user_settings`,
 `invitations` — exactly matching migration stage 1
-(`LifeOS-Technical-Handoff.md` "Migration Order": *"Identity/ownership
+(`LifeOS-Technical-Handoff.md` "Migration Order": _"Identity/ownership
 (profiles, workspaces, workspace_members, user_settings, invitations —
-F2)"*) and the workspace-anchoring model (D18), with Space ownership and
+F2)"_) and the workspace-anchoring model (D18), with Space ownership and
 visibility deliberately **not** included here (that's Slice 4, migration
-stage 2). No application code, no auth flow, no RLS *policies* with real
+stage 2). No application code, no auth flow, no RLS _policies_ with real
 logic yet beyond enabling RLS itself — this slice is pure schema.
 
 ### Migration Order
@@ -83,7 +102,7 @@ database changes, no combined mega-migration):
 4. `0004_user_settings`
 5. `0005_invitations`
 
-This ordering is *within* migration stage 1 only — it doesn't renumber the
+This ordering is _within_ migration stage 1 only — it doesn't renumber the
 13-stage order in `LifeOS-Technical-Handoff.md`; stage 1 simply now has 5
 internal steps instead of 1. (Alternative considered: one combined
 migration for the whole stage, matching the Handoff's stage-level
@@ -108,13 +127,13 @@ and `invitations` both depend on rows existing in `workspaces` and
 
 ### Foreign Key Dependencies
 
-| Table | Foreign keys | On delete |
-|---|---|---|
-| `profiles` | `id` → `auth.users.id` (shared PK, not a separate UUID — standard Supabase pattern) | cascade (Supabase manages `auth.users` deletion; out of scope to override here) |
-| `workspaces` | none in the minimal model (see Assumption 1) | — |
-| `workspace_members` | `workspace_id` → `workspaces.id`; `user_id` → `profiles.id` | restrict (membership rows are removed by the protected member-removal service, Slice 16 — never cascaded silently) |
-| `user_settings` | `user_id` → `profiles.id` | cascade (settings are meaningless without the profile) |
-| `invitations` | `workspace_id` → `workspaces.id`; `created_by` → `profiles.id` | restrict on `workspace_id`; `created_by` should tolerate the inviter's profile existing (it always will in v1's two-account model) |
+| Table               | Foreign keys                                                                        | On delete                                                                                                                          |
+| ------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `profiles`          | `id` → `auth.users.id` (shared PK, not a separate UUID — standard Supabase pattern) | cascade (Supabase manages `auth.users` deletion; out of scope to override here)                                                    |
+| `workspaces`        | none in the minimal model (see Assumption 1)                                        | —                                                                                                                                  |
+| `workspace_members` | `workspace_id` → `workspaces.id`; `user_id` → `profiles.id`                         | restrict (membership rows are removed by the protected member-removal service, Slice 16 — never cascaded silently)                 |
+| `user_settings`     | `user_id` → `profiles.id`                                                           | cascade (settings are meaningless without the profile)                                                                             |
+| `invitations`       | `workspace_id` → `workspaces.id`; `created_by` → `profiles.id`                      | restrict on `workspace_id`; `created_by` should tolerate the inviter's profile existing (it always will in v1's two-account model) |
 
 ### Indexes
 
@@ -141,7 +160,7 @@ and `invitations` both depend on rows existing in `workspaces` and
 ### Triggers
 
 - `updated_at` auto-touch trigger on all five tables (standard pattern, implementation detail, not architectural).
-- A trigger (or equivalent) enforcing the **two-member-per-workspace cap** as a database-level backstop. Per D17's own stated philosophy — the database/RLS layer is the *baseline*, never the *sole* integrity control — primary enforcement of the two-member cap belongs in the protected invitation-acceptance service (Slice 16), with this trigger as defense-in-depth, not the other way around. This mirrors existing precedent rather than inventing new architecture.
+- A trigger (or equivalent) enforcing the **two-member-per-workspace cap** as a database-level backstop. Per D17's own stated philosophy — the database/RLS layer is the _baseline_, never the _sole_ integrity control — primary enforcement of the two-member cap belongs in the protected invitation-acceptance service (Slice 16), with this trigger as defense-in-depth, not the other way around. This mirrors existing precedent rather than inventing new architecture.
 
 ### Row-Level Security (RLS) Strategy
 
@@ -184,7 +203,7 @@ slice's:
   a clean dev database, confirm the expected tables/columns/constraints/
   indexes/triggers exist, then run the down-migrations in reverse and
   confirm a clean drop, then re-apply and confirm an identical result.
-- **No RLS *policy behavior* tests yet.** Real cross-workspace/cross-visibility
+- **No RLS _policy behavior_ tests yet.** Real cross-workspace/cross-visibility
   policy tests need an actual way to create two authenticated sessions —
   that doesn't exist until Slice 2 (sign-up/sign-in). Writing "policy
   tests" against empty tables with no service layer would be theater, not
@@ -285,7 +304,7 @@ migration-testing question (see Risks) — not in volume of SQL.
 - **Objective:** The approved one-transaction sign-up (Auth user, profile,
   workspace, owner `workspace_members` row, default `user_settings`),
   sign-in, sign-out, password reset, and closed-sign-up enforcement (public
-  sign-up disabled after the first account) — the invitation *acceptance*
+  sign-up disabled after the first account) — the invitation _acceptance_
   path itself is deferred to Slice 16.
 - **Estimated complexity:** High — first protected-write service, first
   policy tests, first real auth surface.
